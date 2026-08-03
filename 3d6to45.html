@@ -43,11 +43,11 @@
     --ok: #3fb86a;
 
     --c1: #0000ff; /* blue */
-    --c2: #00cae0; /* cyan */
+    --c2: #ffffff; /* white */
     --c3: #e68600; /* orange */
     --c4: #2eb300; /* green */
     --c5: #85009e; /* purple */
-    --c6: #e000a4; /* pink */
+    --c6: #d30000; /* red */
 
     /* spiral ring bands, innermost to outermost */
     --ring0-bg: #0f4d54; --ring0-border: #16838c;
@@ -645,13 +645,33 @@
   .hidden{ display:none !important; }
   .fade-in{ animation: fadeIn .2s ease; }
   @keyframes fadeIn{ from{opacity:0;} to{opacity:1;} }
+
+  .home-btn{
+    position: fixed;
+    top: 14px; left: 14px;
+    z-index: 40;
+    width: 42px; height: 42px;
+    border-radius: 50%;
+    background: var(--panel);
+    border: 1px solid var(--gold-dim);
+    color: var(--text);
+    font-size: 20px;
+    line-height: 1;
+    cursor: pointer;
+    display:flex; align-items:center; justify-content:center;
+    box-shadow: 0 4px 12px rgba(0,0,0,.5);
+    transition: all .15s ease;
+  }
+  .home-btn:hover{ border-color: var(--gold); color: var(--gold); }
 </style>
 </head>
 <body>
 
+<button id="home-btn" class="home-btn hidden" title="Leave to home">&#8962;</button>
+
 <div class="wrap">
   <div class="brand-header">
-    <img class="brand-logo" src="" id="https://imgur.com/a/id8zNVg" alt="BoFaS">
+  <img class="brand-logo" src="https://i.imgur.com/id8zNVg.png" alt="BoFaS">
     <script>document.getElementById("https://imgur.com/a/id8zNVg").src = window.BOFAS_ASSETS.logo;</script>
     <h1 class="title"><span class="ti-b">B</span>eauty of <span class="ti-f">F</span>ire &amp; <span class="ti-s">S</span>hadow</h1>
     <div class="subtitle">3d6 to 45 &middot; play online with friends</div>
@@ -685,6 +705,7 @@
   <div id="game-screen" class="hidden">
     <div class="game-header">
       <div class="me-badge" id="me-badge"></div>
+      <button class="icon-btn small" id="change-color-btn">Change Color</button>
 
       <div class="room-panel hidden" id="room-panel">
         <span class="conn-dot" id="conn-dot"></span>
@@ -696,6 +717,11 @@
         <span class="conn-dot" id="guest-conn-dot"></span>
         <span id="guest-status-text">Connected</span>
       </div>
+    </div>
+
+    <div class="side-card hidden" id="color-change-panel" style="margin-bottom:16px;">
+      <h3>Change Your Color</h3>
+      <div class="color-grid" id="color-change-grid"></div>
     </div>
 
     <div class="layout">
@@ -769,11 +795,11 @@
 
   var COLORS = [
     { key: "c1", name: "Blue" },
-    { key: "c2", name: "Cyan" },
+    { key: "c2", name: "White" },
     { key: "c3", name: "Orange" },
     { key: "c4", name: "Green" },
     { key: "c5", name: "Purple" },
-    { key: "c6", name: "Pink" }
+    { key: "c6", name: "Red" }
   ];
   function colorVar(key){ return "var(--" + key + ")"; }
   function colorName(key){
@@ -854,6 +880,7 @@
   var landingScreen = document.getElementById("landing-screen");
   var namecolorScreen = document.getElementById("namecolor-screen");
   var gameScreen = document.getElementById("game-screen");
+  var homeBtn = document.getElementById("home-btn");
 
   function showScreen(name){
     landingScreen.classList.add("hidden");
@@ -862,6 +889,7 @@
     if(name === "landing") landingScreen.classList.remove("hidden");
     if(name === "namecolor") namecolorScreen.classList.remove("hidden");
     if(name === "game") gameScreen.classList.remove("hidden");
+    homeBtn.classList.toggle("hidden", name === "landing");
   }
 
   // ---------------------------------------------------------------
@@ -878,6 +906,43 @@
   showJoinBtn.onclick = function(){
     joinForm.classList.toggle("hidden");
   };
+
+  homeBtn.onclick = function(){
+    var msg = isHost
+      ? "Leave this room? This will end the game for everyone still connected."
+      : "Leave this room and return to the home screen?";
+    if(confirm(msg)) leaveToHome();
+  };
+
+  function leaveToHome(){
+    try{ if(peer) peer.destroy(); }catch(e){}
+    peer = null;
+    hostConn = null;
+    guestConns = {};
+    isHost = false;
+    myOwnerId = null;
+    roomCode = null;
+    connectMode = null;
+    pendingColor = null;
+    guestReceivedFirstState = false;
+    selectedPlayerId = null;
+    undoStack = [];
+    redoStack = [];
+    dtLastKnown = [null, null, null];
+
+    state = { players: [], scoreboard: {}, dice: [null, null, null] };
+    COLORS.forEach(function(c){ state.scoreboard[c.key] = 0; });
+
+    hostBtn.disabled = false;
+    showJoinBtn.disabled = false;
+    joinForm.classList.add("hidden");
+    joinCodeInput.value = "";
+    joinError.textContent = "";
+    landingStatus.textContent = "";
+    joinBtn.disabled = false;
+
+    showScreen("landing");
+  }
 
   function genRoomCode(){
     var chars = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"; // no 0/O/1/I
@@ -1084,6 +1149,60 @@
   };
 
   // ---------------------------------------------------------------
+  // Change color without leaving the lobby
+  // ---------------------------------------------------------------
+  var changeColorBtn = document.getElementById("change-color-btn");
+  var colorChangePanel = document.getElementById("color-change-panel");
+  var colorChangeGrid = document.getElementById("color-change-grid");
+
+  function myPlayer(){
+    return state.players.filter(function(p){ return p.ownerId === myOwnerId; })[0];
+  }
+
+  function renderColorChangePanel(){
+    if(colorChangePanel.classList.contains("hidden")) return;
+    var me = myPlayer();
+    colorChangeGrid.innerHTML = "";
+    COLORS.forEach(function(c){
+      var isMine = !!me && me.colorKey === c.key;
+      var isTaken = !isMine && state.players.some(function(p){ return p !== me && p.colorKey === c.key; });
+      var sw = document.createElement("div");
+      sw.className = "color-swatch" + (isTaken ? " taken" : "") + (isMine ? " selected" : "");
+      sw.style.background = colorVar(c.key);
+      if(isTaken){
+        var lbl = document.createElement("div");
+        lbl.className = "taken-label";
+        lbl.textContent = "Taken";
+        sw.appendChild(lbl);
+      } else {
+        sw.onclick = function(){
+          requestColorChange(c.key);
+          colorChangePanel.classList.add("hidden");
+        };
+      }
+      colorChangeGrid.appendChild(sw);
+    });
+  }
+
+  function requestColorChange(colorKey){
+    var me = myPlayer();
+    if(!me || me.colorKey === colorKey) return;
+    if(isHost){
+      if(state.players.some(function(p){ return p !== me && p.colorKey === colorKey; })) return;
+      pushHistory();
+      me.colorKey = colorKey;
+      broadcastState();
+    } else {
+      hostConn && hostConn.send({ type: "changeColor", colorKey: colorKey });
+    }
+  }
+
+  changeColorBtn.onclick = function(){
+    colorChangePanel.classList.toggle("hidden");
+    renderColorChangePanel();
+  };
+
+  // ---------------------------------------------------------------
   // HOST MESSAGE HANDLING
   // ---------------------------------------------------------------
   function handleHostMessage(conn, msg){
@@ -1144,6 +1263,19 @@
       hostRecolorDie(msg.index);
       broadcastState();
     }
+
+    else if(msg.type === "changeColor"){
+      var changer = state.players.filter(function(p){ return p.ownerId === conn.peer; })[0];
+      if(!changer) return;
+      var clash = state.players.some(function(p){ return p !== changer && p.colorKey === msg.colorKey; });
+      if(clash){
+        conn.send({ type: "state", state: state });
+        return;
+      }
+      pushHistory();
+      changer.colorKey = msg.colorKey;
+      broadcastState();
+    }
   }
 
   function broadcastState(){
@@ -1155,26 +1287,13 @@
 
   function clamp(v, lo, hi){ return Math.max(lo, Math.min(hi, v)); }
 
-  // find a free space near "desired" (spaces 1..60 must be exclusive; slot 0 = start, always free)
+  // Clamp a desired slot to the board range. Multiple tokens are allowed to
+  // share any space (including mid-board spaces, not just Start) — layoutTokens()
+  // fans them out visually so they stay distinguishable and grabbable.
   function resolveSlot(desired, excludePlayerId){
     if(desired <= 0) return 0;
-    if(desired > BOARD_SIZE) desired = BOARD_SIZE;
-
-    function occupied(slot){
-      return state.players.some(function(p){
-        return p.id !== excludePlayerId && p.slot === slot;
-      });
-    }
-
-    if(!occupied(desired)) return desired;
-
-    for(var d=1; d<BOARD_SIZE; d++){
-      var up = desired + d;
-      var down = desired - d;
-      if(up <= BOARD_SIZE && !occupied(up)) return up;
-      if(down >= 1 && !occupied(down)) return down;
-    }
-    return 0; // board completely full (shouldn't happen with <=6 tokens)
+    if(desired > BOARD_SIZE) return BOARD_SIZE;
+    return desired;
   }
 
   // ---------------------------------------------------------------
@@ -1295,6 +1414,16 @@
     return { x: f.x * blockW, y: f.y * blockH };
   }
 
+  // compact fan-out for multiple tokens sharing one ordinary board space
+  var SHARED_SLOT_FRACTIONS = [
+    {x:0,y:0}, {x:-0.3,y:-0.28}, {x:0.3,y:-0.28},
+    {x:-0.3,y:0.28}, {x:0.3,y:0.28}, {x:0,y:-0.42}
+  ];
+  function sharedSlotOffset(index, cellW, cellH){
+    var f = SHARED_SLOT_FRACTIONS[index % SHARED_SLOT_FRACTIONS.length];
+    return { x: f.x * cellW, y: f.y * cellH };
+  }
+
   // ---------------------------------------------------------------
   // Tokens rendering + drag
   // ---------------------------------------------------------------
@@ -1320,19 +1449,27 @@
   }
 
   function layoutTokens(animate){
-    var startGroup = state.players.filter(function(p){ return p.slot === 0; });
+    var groups = {}; // slot -> players sharing it (covers Start AND ordinary board spaces)
+    state.players.forEach(function(p){
+      var key = String(p.slot);
+      if(!groups[key]) groups[key] = [];
+      groups[key].push(p);
+    });
+
     state.players.forEach(function(p){
       var el = tokenEls[p.id];
       if(!el) return;
+      var group = groups[String(p.slot)];
+      var idx = group.indexOf(p);
       var x, y;
       if(p.slot === 0){
-        var idx = startGroup.indexOf(p);
         var base = targets["0"];
         var off = startZoneOffset(idx, base.w, base.h);
         x = base.x + off.x; y = base.y + off.y;
       } else {
         var t = targets[String(p.slot)];
-        x = t.x; y = t.y;
+        var off2 = sharedSlotOffset(idx, t.w, t.h);
+        x = t.x + off2.x; y = t.y + off2.y;
       }
       if(!animate) el.style.transition = "none";
       el.style.left = x + "px";
@@ -1778,6 +1915,7 @@
     renderMoveButtons();
     renderHeader();
     syncDiceVisuals();
+    renderColorChangePanel();
   }
 
   function enterGameScreen(){
